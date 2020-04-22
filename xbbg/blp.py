@@ -9,6 +9,42 @@ from xbbg.io import logs, files, storage
 from xbbg.core import utils, conn, process
 
 
+def bsrch(tickers, flds, domain, variables, **kwargs):
+    logger = logs.get_logger(bdp, **kwargs)
+
+    service = conn.bbg_service(service='//blp/exrsvc', **kwargs)
+    request = service.createRequest("ExcelGetGridRequest")
+    request.set("Domain", domain)
+
+    overrides = request.getElement("Overrides")
+
+    for key, value in variables.items():
+        override1 = overrides.appendElement()
+        override1.setElement("name", key)
+        override1.setElement("value", value)
+
+    process.init_request(request=request, tickers=tickers, flds=flds, **kwargs)
+    logger.debug(f'Sending request to Bloomberg ...\n{request}')
+    conn.send_request(request=request, **kwargs)
+
+    res = pd.DataFrame(process.rec_events(func=process.process_ref))
+    if kwargs.get('raw', False): return res
+    if res.empty or any(fld not in res for fld in ['ticker', 'field']):
+        return pd.DataFrame()
+
+    col_maps = kwargs.get('col_maps', None)
+
+    cols = res.field.unique()
+    return (
+        res
+        .set_index(['ticker', 'field'])
+        .unstack(level=1)
+        .rename_axis(index=None, columns=[None, None])
+        .droplevel(axis=1, level=0)
+        .loc[:, cols]
+        .pipe(pipeline.standard_cols, col_maps=col_maps)
+    )
+
 def bdp(tickers, flds, **kwargs) -> pd.DataFrame:
     """
     Bloomberg reference data
@@ -697,3 +733,4 @@ def fut_ticker(gen_ticker: str, dt, freq: str, **kwargs) -> str:
     logger.debug(f'futures full chain:\n{fut_matu.to_string()}')
     logger.debug(f'getting index {idx} from:\n{sub_fut.to_string()}')
     return sub_fut.index.values[idx]
+
